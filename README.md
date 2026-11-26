@@ -3,6 +3,14 @@
 A full-stack e-commerce website for mechanical keyboards, switches, keycaps and
 accessories — built as a college practical-examination project.
 
+**🔗 Live demo:** [https://abhishek-keyforge.onrender.com](https://abhishek-keyforge.onrender.com)
+
+> **Note on the live demo:** hosted on Render's free tier. The store is fully
+> functional (browse, register, cart, checkout, admin panel). Because free-tier
+> hosting blocks outbound SMTP ports, **email delivery runs in log mode** on the
+> live deployment — sent emails are recorded and viewable under **Admin → Emails**
+> instead of being delivered. Run locally with Gmail SMTP configured for live delivery.
+
 ## Features
 
 - Product catalog with category filtering and search
