@@ -493,7 +493,20 @@ app.post('/api/checkout', auth,
           }),
           signal: AbortSignal.timeout(15000)
         });
-        const kd = await initRes.json();
+        const rawText = await initRes.text();
+        let kd;
+        try {
+          kd = JSON.parse(rawText);
+        } catch (parseErr) {
+          // Khalti returned non-JSON (likely an HTML error page) — surface it for debugging
+          console.error('[khalti] non-JSON response. status:', initRes.status, 'url:', `${KHALTI_BASE}epayment/initiate/`, 'body:', rawText.slice(0, 300));
+          logStatus(orderId, 'pending', 'Khalti non-JSON response (HTTP ' + initRes.status + ')');
+          return res.status(502).json({
+            error: 'Khalti returned an unexpected (non-JSON) response. Check KHALTI_SECRET_KEY and KHALTI_BASE_URL.',
+            httpStatus: initRes.status,
+            snippet: rawText.slice(0, 200)
+          });
+        }
         if (!initRes.ok || !kd.payment_url) {
           logStatus(orderId, 'pending', 'Khalti initiate failed: ' + (kd.detail || kd.error_key || 'unknown'));
           return res.status(500).json({ error: 'Khalti init failed: ' + (kd.detail || 'unknown error') });
