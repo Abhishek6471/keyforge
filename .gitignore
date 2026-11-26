@@ -1,0 +1,14 @@
+node_modules/
+server/*.db
+client/dist/
+
+# Environment files — never commit secrets
+.env
+.env.local
+.env.*.local
+.env.development
+.env.production
+*.env
+.env.bak
+*.bak
+*.db
