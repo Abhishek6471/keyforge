@@ -9,11 +9,17 @@ accessories — built as a college practical-examination project.
 - Product detail pages
 - **Keyboard configurator** — pick case, switches and keycaps; price updates live
 - User registration and login (JWT authentication, hashed passwords)
+- Email verification & password reset (real emails via Gmail SMTP)
 - Persistent shopping cart tied to each user account
-- Checkout flow (Stripe test-mode ready, with a demo/simulated payment fallback)
-- Order history per user
+- Checkout flow with discount codes (Stripe test-mode ready, plus Cash on Delivery)
+- **Live email notifications** — welcome, order confirmation, status updates and
+  password-reset emails sent to customers; admin alerts for new orders/registrations/reviews
+- Order history with a status-tracking timeline and order cancellation
+- Product reviews with a purchase-gate (only buyers can review) and admin moderation
+- Wishlist and a saved-address book per user
 - **Admin panel** (`/admin`) — dashboard stats, order management with status
-  updates, full product CRUD (create/edit/delete), and a customer list
+  updates, full product CRUD, inventory/restock tracking with movement history,
+  review moderation, customer list, and an email-delivery log
 
 ## Tech Stack
 
@@ -23,7 +29,8 @@ accessories — built as a college practical-examination project.
 | Backend | Node.js, Express |
 | Database | SQLite (via Node's built-in `node:sqlite`) |
 | Auth | JSON Web Tokens (JWT) + bcrypt password hashing |
-| Payments | Stripe SDK (optional, test mode) |
+| Email | Nodemailer over Gmail SMTP (live delivery to any address) |
+| Payments | Stripe SDK (optional, test mode) + Cash on Delivery |
 
 ## Project Structure
 
@@ -80,18 +87,40 @@ cd client && npm run dev
 Log in as the admin, then open **`/admin`** (or click **Admin** in the navbar) to
 access the dashboard, orders, products and users management.
 
-## Environment Variables (optional)
+## Environment Variables
 
-Copy `.env.example` to `server/.env` and fill in if you want live Stripe payments:
+The app runs with **zero configuration** — copy `.env.example` to `.env` and it works
+offline using a simulated demo checkout and log-only emails. To enable **live email
+delivery** and **real Stripe payments**, fill in the values below.
 
 | Variable | Purpose |
 |---|---|
-| `STRIPE_SECRET_KEY` | Enables real Stripe test-mode PaymentIntents |
-| `JWT_SECRET` | Secret used to sign auth tokens (set in production) |
-| `PORT` | Server port (default 4000) |
+| `SMTP_HOST` | SMTP server (e.g. `smtp.gmail.com`) — enables live email |
+| `SMTP_PORT` | SMTP port (`587` for Gmail) |
+| `SMTP_USER` | Sender Gmail address (e.g. `you@gmail.com`) |
+| `SMTP_PASS` | Gmail **App Password** (16 characters — not your normal password) |
+| `EMAIL_FROM` | Display name + address shown to recipients |
+| `ADMIN_EMAIL` | Where admin alerts (new order/register/review) are sent |
+| `RESEND_API_KEY` | *(Alternative to SMTP)* Resend API key for transactional email |
+| `JWT_SECRET` | Secret used to sign auth tokens (set a long random string in production) |
+| `PORT` | Server port (default `4000`) |
+| `APP_URL` | Public URL, used in verification / password-reset email links |
+| `STRIPE_SECRET_KEY` | *(Optional)* Enables real Stripe test-mode PaymentIntents |
 
-Without `STRIPE_SECRET_KEY` the app uses a **simulated demo checkout** so the
-full flow can be demonstrated offline.
+### Email modes
+
+The mailer picks its mode automatically from the environment:
+
+| Mode | When | Behaviour |
+|---|---|---|
+| **SMTP** | `SMTP_HOST` + `SMTP_USER` + `SMTP_PASS` set | Sends real email via Gmail to any address |
+| **Resend** | `RESEND_API_KEY` set (takes priority) | Sends via the Resend API |
+| **Log** | Neither set (default) | Emails recorded to the DB + console only — never claims "sent" unless really sent |
+
+> **Gmail note:** you must enable 2-Step Verification and create an **App Password**
+> (myaccount.google.com/apppasswords) — a normal Gmail password will be rejected.
+> Every send attempt is recorded in the `email_logs` table and viewable in
+> **Admin → Emails**.
 
 ## Notes
 
