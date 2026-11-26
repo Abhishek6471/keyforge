@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
 
 const fmt = c => `Rs. ${(c / 100).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
@@ -10,6 +10,17 @@ export default function Orders() {
   const [orders, setOrders] = useState(null);
   const [openId, setOpenId] = useState(null);
   const [msg, setMsg] = useState('');
+  const [params, setParams] = useSearchParams();
+  const payStatus = params.get('status');
+  const payOrder = params.get('orderId');
+  const payReason = params.get('reason');
+
+  // Clear the Khalti result banner after a few seconds
+  useEffect(() => {
+    if (!payStatus) return;
+    const t = setTimeout(() => setParams({}, { replace: true }), 6000);
+    return () => clearTimeout(t);
+  }, [payStatus, setParams]);
 
   async function load() {
     const r = await fetch('/api/orders', { headers: { Authorization: `Bearer ${token}` } });
@@ -35,6 +46,15 @@ export default function Orders() {
     <div>
       <h1>My Orders</h1>
       {msg && <p className="msg ok">{msg}</p>}
+      {payStatus && payStatus === 'success' && (
+        <p className="msg ok">✅ Payment received via Khalti{payOrder ? ` for order ${payOrder}` : ''}. Your order is confirmed!</p>
+      )}
+      {payStatus && payStatus === 'failed' && (
+        <p className="msg err">⚠️ Khalti payment not completed{payReason ? ` (${payReason.replace(/_/g, ' ')})` : ''}. The order is saved as pending — you can retry payment or it can be paid later.</p>
+      )}
+      {payStatus && payStatus === 'error' && (
+        <p className="msg err">⚠️ There was a problem verifying your Khalti payment{payReason ? ` (${payReason.replace(/_/g, ' ')})` : ''}. Please contact support if you were charged.</p>
+      )}
       {orders.map(o => {
         const canCancel = CANCELLABLE.includes(o.status);
         return (

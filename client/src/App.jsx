@@ -56,7 +56,7 @@ function Storefront() {
         </Routes>
       </main>
       <footer className="footer">
-        <span>⌨ KeyForge — College project demo. Payments run in Stripe <b>test mode</b>; no real charges.</span>
+        <span>⌨ KeyForge — College project demo. Payments run in test/sandbox mode (Khalti &amp; Stripe); no real charges.</span>
       </footer>
     </>
   );

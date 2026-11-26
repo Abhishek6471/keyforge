@@ -28,6 +28,11 @@ if (process.env.STRIPE_SECRET_KEY) {
   stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 }
 
+// Khalti e-payment (optional) — Nepali wallet, used if KHALTI_SECRET_KEY is set.
+// Sandbox: https://dev.khalti.com/api/v2  |  Production: https://khalti.com/api/v2
+const KHALTI_SECRET_KEY = process.env.KHALTI_SECRET_KEY || null;
+const KHALTI_BASE = process.env.KHALTI_BASE_URL || 'https://dev.khalti.com/api/v2';
+
 const fmt = c => `Rs. ${(c / 100).toLocaleString('en-IN')}`;
 
 // ================= MIDDLEWARE =================
@@ -438,6 +443,71 @@ app.post('/api/checkout', auth,
       }
     }
 
+    // ---- Khalti e-payment ----
+    if (method === 'khalti') {
+      if (!KHALTI_SECRET_KEY) return res.status(400).json({ error: 'Khalti not configured. Use Cash on Delivery.' });
+
+      // 1. Create a pending order (stock decremented, cart cleared) — same as COD,
+      //    but status stays 'pending' until Khalti confirms payment.
+      const insertOrder = db.prepare(`INSERT INTO orders (id,user_id,subtotal_cents,shipping_cents,discount_cents,total_cents,status,payment_method,payment_status,shipping_name,shipping_phone,shipping_address,shipping_city,shipping_postal) VALUES (?,?,?,?,?,?,'pending','khalti','pending',?,?,?,?,?)`);
+      const insertItem = db.prepare('INSERT INTO order_items (order_id,product_id,product_name,config_json,qty,price_cents) VALUES (?,?,?,?,?,?)');
+      const clearCart = db.prepare('DELETE FROM cart_items WHERE user_id=?');
+      db.exec('BEGIN');
+      try {
+        insertOrder.run(orderId, req.user.id, subtotal, shipping_cents, discount, total, ship.name, ship.phone, ship.address, ship.city, ship.postal);
+        for (const r of rows) {
+          insertItem.run(orderId, r.pid, r.name, r.config_json, r.qty, unitPrice(r.price_cents, r.options_json, r.config_json));
+          adjustStock(r.pid, -r.qty, 'order', orderId);
+        }
+        logStatus(orderId, 'pending', 'Order placed');
+        logStatus(orderId, 'pending', 'Awaiting Khalti payment');
+        clearCart.run(req.user.id);
+        db.exec('COMMIT');
+      } catch (e) {
+        db.exec('ROLLBACK');
+        return res.status(500).json({ error: 'Checkout failed: ' + e.message });
+      }
+
+      // 2. Ask Khalti to initiate the payment
+      const user = getUserById(req.user.id);
+      try {
+        const initRes = await fetch(`${KHALTI_BASE}epayment/initiate/`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Key ${KHALTI_SECRET_KEY}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            return_url: `${APP_URL}/api/payments/khalti/return`,
+            website_url: APP_URL,
+            amount: total, // paisa
+            purchase_order_id: orderId,
+            purchase_order_name: `KeyForge order ${orderId}`,
+            customer_info: {
+              name: ship.name || user.name,
+              email: user.email,
+              phone: (ship.phone || '').replace(/\D/g, '') || '9800000001'
+            }
+          }),
+          signal: AbortSignal.timeout(15000)
+        });
+        const kd = await initRes.json();
+        if (!initRes.ok || !kd.payment_url) {
+          logStatus(orderId, 'pending', 'Khalti initiate failed: ' + (kd.detail || kd.error_key || 'unknown'));
+          return res.status(500).json({ error: 'Khalti init failed: ' + (kd.detail || 'unknown error') });
+        }
+
+        // 3. Record the payment with the Khalti pidx as reference
+        db.prepare('INSERT INTO payments (order_id,method,status,amount_cents,reference) VALUES (?,?,?,?,?)')
+          .run(orderId, 'khalti', 'pending', total, kd.pidx);
+
+        return res.json({ payment_url: kd.payment_url, orderId, total });
+      } catch (e) {
+        logStatus(orderId, 'pending', 'Khalti error: ' + e.message);
+        return res.status(500).json({ error: 'Khalti error: ' + e.message });
+      }
+    }
+
     const insertOrder = db.prepare(`INSERT INTO orders (id,user_id,subtotal_cents,shipping_cents,discount_cents,total_cents,status,payment_method,payment_status,shipping_name,shipping_phone,shipping_address,shipping_city,shipping_postal) VALUES (?,?,?,?,?,?,'confirmed','cod','pending',?,?,?,?,?)`);
     const insertItem = db.prepare('INSERT INTO order_items (order_id,product_id,product_name,config_json,qty,price_cents) VALUES (?,?,?,?,?,?)');
     const clearCart = db.prepare('DELETE FROM cart_items WHERE user_id=?');
@@ -495,6 +565,74 @@ app.post('/api/payments/stripe/webhook', express.raw({ type: 'application/json' 
     }
   }
   res.json({ received: true });
+});
+
+// ---- Khalti return/callback ----
+// Khalti redirects the user here after payment. We verify via the lookup API
+// (never trust the query params alone), mark the order paid if Completed, send
+// the confirmation emails, then bounce the user to the frontend orders page.
+app.get('/api/payments/khalti/return', async (req, res) => {
+  const { pidx, purchase_order_id } = req.query;
+  const orderId = purchase_order_id;
+  if (!pidx || !orderId) return res.redirect(`${APP_URL}/orders?payment=khalti&status=error&reason=missing`);
+
+  // Verify the transaction server-side via Khalti's lookup API
+  let lookup;
+  try {
+    const lr = await fetch(`${KHALTI_BASE}epayment/lookup/`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Key ${KHALTI_SECRET_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ pidx }),
+      signal: AbortSignal.timeout(15000)
+    });
+    lookup = await lr.json();
+  } catch (e) {
+    return res.redirect(`${APP_URL}/orders?payment=khalti&status=error&reason=lookup_failed`);
+  }
+
+  const order = db.prepare('SELECT * FROM orders WHERE id=?').get(orderId);
+  if (!order) return res.redirect(`${APP_URL}/orders?payment=khalti&status=error&reason=order_not_found`);
+
+  if (lookup.status === 'Completed') {
+    // Idempotency: only confirm + email once
+    if (order.payment_status !== 'paid') {
+      db.prepare("UPDATE orders SET payment_status='paid', status='confirmed' WHERE id=?").run(orderId);
+      db.prepare("UPDATE payments SET status='paid' WHERE order_id=?").run(orderId);
+      logStatus(orderId, 'confirmed', 'Payment received (Khalti)');
+
+      // Send confirmation emails (best-effort — don't block the redirect)
+      try {
+        const items = db.prepare('SELECT * FROM order_items WHERE order_id=?').all(orderId);
+        const user = getUserById(order.user_id);
+        const orderForMail = {
+          id: orderId,
+          items: items.map(it => ({ product_name: it.product_name, qty: it.qty, price_cents: it.price_cents, config: it.config_json ? JSON.parse(it.config_json) : null })),
+          subtotal_cents: order.subtotal_cents, shipping_cents: order.shipping_cents,
+          discount_cents: order.discount_cents, total_cents: order.total_cents,
+          payment_method: 'khalti', payment_status: 'paid',
+          shipping_address: order.shipping_address, shipping_city: order.shipping_city
+        };
+        const tpl = T.orderConfirmationEmail(user.name, orderForMail);
+        await sendEmail({ to: user.email, ...tpl, template: 'order-confirmation' });
+        await sendEmail({
+          to: ADMIN_EMAIL, subject: `New order ${orderId} — ${fmt(order.total_cents)}`,
+          html: `<p>New order from <b>${user.name}</b> (${user.email})</p><p>Total: <b>${fmt(order.total_cents)}</b> (paid via Khalti)</p>`,
+          text: `New order ${orderId} from ${user.name} — ${fmt(order.total_cents)} (Khalti)`,
+          template: 'admin-order'
+        });
+      } catch (e) {
+        console.error('[khalti] email error:', e.message);
+      }
+    }
+    return res.redirect(`${APP_URL}/orders?payment=khalti&status=success&orderId=${orderId}`);
+  }
+
+  // Not completed — could be Pending / User canceled / Expired
+  const reason = (lookup.status || 'unknown').replace(/\s+/g, '_');
+  return res.redirect(`${APP_URL}/orders?payment=khalti&status=failed&reason=${encodeURIComponent(reason)}&orderId=${orderId}`);
 });
 
 // ================= CUSTOMER ORDERS =================

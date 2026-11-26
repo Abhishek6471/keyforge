@@ -46,6 +46,11 @@ export default function Cart() {
       if (useSaved && addressId) payload.addressId = addressId;
       else payload.shipping = ship;
       const res = await checkout(payload);
+      // Khalti returns a hosted payment URL — send the user there to pay.
+      if (res.payment_url) {
+        window.location.href = res.payment_url;
+        return;
+      }
       setDone(res);
     } catch (e) {
       setErr(e.message);
@@ -127,6 +132,10 @@ export default function Cart() {
               <input type="radio" name="pay" checked={paymentMethod === 'cod'} onChange={() => setPaymentMethod('cod')} />
               <span>💵 Cash on Delivery</span>
             </label>
+            <label className={`pay-opt ${paymentMethod === 'khalti' ? 'active' : ''}`}>
+              <input type="radio" name="pay" checked={paymentMethod === 'khalti'} onChange={() => setPaymentMethod('khalti')} />
+              <span>🟢 Khalti (Nepali wallet)</span>
+            </label>
             <label className={`pay-opt ${paymentMethod === 'stripe' ? 'active' : ''}`}>
               <input type="radio" name="pay" checked={paymentMethod === 'stripe'} onChange={() => setPaymentMethod('stripe')} />
               <span>💳 Card (Stripe test mode)</span>
@@ -146,10 +155,11 @@ export default function Cart() {
           <p className="muted sm">Try code <b>KEYFORGE10</b> for 10% off.</p>
 
           <button className="btn wide" onClick={handleCheckout} disabled={busy}>
-            {busy ? 'Placing order…' : paymentMethod === 'stripe' ? 'Pay with Card (test)' : 'Place order (COD)'}
+            {busy ? 'Placing order…' : paymentMethod === 'stripe' ? 'Pay with Card (test)' : paymentMethod === 'khalti' ? 'Pay with Khalti' : 'Place order (COD)'}
           </button>
           {err && <p className="msg err">{err}</p>}
           {paymentMethod === 'stripe' && <p className="muted sm">Card payments run in Stripe test mode — no real charge.</p>}
+          {paymentMethod === 'khalti' && <p className="muted sm">You'll be redirected to Khalti's sandbox to complete payment — no real charge.</p>}
         </div>
       </div>
     </div>

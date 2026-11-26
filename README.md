@@ -19,7 +19,7 @@ accessories — built as a college practical-examination project.
 - User registration and login (JWT authentication, hashed passwords)
 - Email verification & password reset (real emails via Gmail SMTP)
 - Persistent shopping cart tied to each user account
-- Checkout flow with discount codes (Stripe test-mode ready, plus Cash on Delivery)
+- Checkout flow with discount codes (Khalti Nepali-wallet sandbox, Stripe test-mode, plus Cash on Delivery)
 - **Live email notifications** — welcome, order confirmation, status updates and
   password-reset emails sent to customers; admin alerts for new orders/registrations/reviews
 - Order history with a status-tracking timeline and order cancellation
@@ -38,7 +38,7 @@ accessories — built as a college practical-examination project.
 | Database | SQLite (via Node's built-in `node:sqlite`) |
 | Auth | JSON Web Tokens (JWT) + bcrypt password hashing |
 | Email | Nodemailer over Gmail SMTP (live delivery to any address) |
-| Payments | Stripe SDK (optional, test mode) + Cash on Delivery |
+| Payments | Khalti e-payment (Nepali wallet, sandbox) + Stripe SDK (optional, test mode) + Cash on Delivery |
 
 ## Project Structure
 
@@ -113,6 +113,8 @@ delivery** and **real Stripe payments**, fill in the values below.
 | `JWT_SECRET` | Secret used to sign auth tokens (set a long random string in production) |
 | `PORT` | Server port (default `4000`) |
 | `APP_URL` | Public URL, used in verification / password-reset email links |
+| `KHALTI_SECRET_KEY` | *(Optional)* Enables Khalti e-payment (Nepali wallet). Sandbox key from test-admin.khalti.com |
+| `KHALTI_BASE_URL` | *(Optional)* Khalti API base. Defaults to the sandbox `https://dev.khalti.com/api/v2` |
 | `STRIPE_SECRET_KEY` | *(Optional)* Enables real Stripe test-mode PaymentIntents |
 
 ### Email modes
