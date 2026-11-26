@@ -29,9 +29,11 @@ if (process.env.STRIPE_SECRET_KEY) {
 }
 
 // Khalti e-payment (optional) — Nepali wallet, used if KHALTI_SECRET_KEY is set.
-// Sandbox: https://dev.khalti.com/api/v2  |  Production: https://khalti.com/api/v2
+// Sandbox: https://dev.khalti.com/api/v2/  |  Production: https://khalti.com/api/v2/
 const KHALTI_SECRET_KEY = process.env.KHALTI_SECRET_KEY || null;
-const KHALTI_BASE = process.env.KHALTI_BASE_URL || 'https://dev.khalti.com/api/v2';
+// Normalize base so it always ends with a slash (endpoints are appended without one)
+const _kb = process.env.KHALTI_BASE_URL || 'https://dev.khalti.com/api/v2';
+const KHALTI_BASE = _kb.endsWith('/') ? _kb : _kb + '/';
 
 const fmt = c => `Rs. ${(c / 100).toLocaleString('en-IN')}`;
 
